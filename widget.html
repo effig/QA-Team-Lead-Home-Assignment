@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidelines QA exercise</title>
+<style>
+body { font: 16px system-ui; background: #f3f5f7; color: #223344; margin: 0; }
+main { max-width: 760px; margin: 30px auto; padding: 20px; }
+section { background: white; padding: 22px; margin: 18px 0; border-radius: 10px; }
+.provider { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 14px; border: 1px solid #ddd; margin: 8px 0; border-radius: 6px; }
+.best { border: 2px solid #12806a; background: #effaf6; }
+.name { flex: 1; } a { color: #1665aa; }
+label { display: inline-block; margin: 8px; }
+input { width: 75px; padding: 7px; } button { padding: 8px 14px; cursor: pointer; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+.note { color: #596b79; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Sports article example</h1>
+<p>Lakers face Warriors. This article includes offers from three fictional providers.</p>
+<section>
+<h2>Lakers vs Warriors</h2>
+<p>Outcome: Lakers to win. All odds are decimal values.</p>
+<div id="widget" data-testid="widget"></div>
+<p id="status" role="status" aria-live="polite"></p>
+<p class="note">Provider links are illustrative. Navigation is simulated in this exercise.</p>
+</section>
+<section>
+<h2>Local data controls</h2>
+<p class="note">Use these controls to supply a new snapshot. An empty odds field supplies null.</p>
+<label>Version <input id="version" type="number" value="2"></label>
+<label>A <input id="oddsA" value="2.20"></label>
+<label>B <input id="oddsB" value="2.10"></label>
+<label>C <input id="oddsC" value=""></label>
+<p>
+<button id="apply" type="button">Send snapshot</button>
+<button id="reset" type="button">Reset</button>
+</p>
+</section>
+<section>
+<h2>Recorded click events</h2>
+<pre id="events" data-testid="events">[]</pre>
+<p class="note">Everything runs locally. No network requests, real bets or external navigation.</p>
+</section>
+</main>
+<script>
+(() => {
+  const widget = document.querySelector('#widget');
+  const status = document.querySelector('#status');
+  const events = [];
+  const newId = () => globalThis.crypto?.randomUUID?.() ||
+    Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+
+  let instanceId = newId(), currentVersion = -1;
+
+  const valid = value =>
+    typeof value === 'number' && Number.isFinite(value) && value > 1;
+
+  const showEvents = () => {
+    document.querySelector('#events').textContent =
+      JSON.stringify(events, null, 2);
+  };
+
+  function update(data) {
+    if (!data || data.gameId !== 'g1' ||
+        !Number.isInteger(data.version) ||
+        !Array.isArray(data.providers)) {
+      throw new Error('Invalid snapshot');
+    }
+
+    const ids = data.providers.map(p => p && p.id);
+    if (ids.some(id => !['A', 'B', 'C'].includes(id)) ||
+        new Set(ids).size !== ids.length) {
+      throw new Error('Provider ids must be unique A, B or C');
+    }
+
+    if (data.version <= currentVersion) return false;
+
+    currentVersion = data.version;
+    widget.replaceChildren();
+    widget.dataset.instanceId = instanceId;
+    widget.dataset.version = String(currentVersion);
+
+    const odds = data.providers.map(p => p.decimalOdds).filter(valid);
+    const best = odds.length ? Math.max(...odds) : null;
+
+    for (const p of data.providers) {
+      const winner = valid(p.decimalOdds) && p.decimalOdds === best;
+      const row = document.createElement('div');
+      row.className = 'provider' + (winner ? ' best' : '');
+      row.dataset.testid = 'provider-' + p.id;
+      row.dataset.best = String(winner);
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = 'Provider ' + p.id;
+
+      const value = document.createElement('span');
+      value.dataset.testid = 'odds';
+      value.textContent = valid(p.decimalOdds)
+        ? p.decimalOdds.toFixed(2) : '--';
+
+      row.append(name, value);
+
+      if (winner) {
+        const badge = document.createElement('strong');
+        badge.dataset.testid = 'best-value';
+        badge.textContent = 'Best Value';
+        row.append(badge);
+      }
+
+      const link = document.createElement('a');
+      const url = new URL('https://sportsbook.example/bet');
+      url.searchParams.set('provider', p.id);
+      url.searchParams.set('game', data.gameId);
+      url.searchParams.set('source', 'widget');
+
+      link.href = url.href;
+      link.dataset.testid = 'provider-link';
+      link.textContent = 'Visit provider';
+
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        events.push({
+          event: 'provider_click',
+          providerId: p.id,
+          gameId: data.gameId,
+          instanceId,
+          eventId: newId()
+        });
+        showEvents();
+        status.textContent = 'Simulated navigation to Provider ' + p.id;
+      });
+
+      row.append(link);
+      widget.append(row);
+    }
+
+    status.textContent = 'Displaying version ' + currentVersion;
+    return true;
+  }
+
+  function reset() {
+    currentVersion = -1;
+    instanceId = newId();
+    events.length = 0;
+
+    update({
+      gameId: 'g1',
+      version: 1,
+      providers: [
+        { id: 'A', decimalOdds: 2.20 },
+        { id: 'B', decimalOdds: 2.10 },
+        { id: 'C', decimalOdds: null }
+      ]
+    });
+
+    showEvents();
+
+    for (const [id, value] of Object.entries({
+      version: '2', oddsA: '2.20', oddsB: '2.10', oddsC: ''
+    })) {
+      document.getElementById(id).value = value;
+    }
+  }
+
+  window.qaWidget = {
+    update,
+    reset,
+    getEvents: () => JSON.parse(JSON.stringify(events))
+  };
+
+  document.querySelector('#apply').addEventListener('click', () => {
+    const readOdds = id => {
+      const value = document.getElementById(id).value.trim();
+      if (!value) return null;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : value;
+    };
+
+    try {
+      const rawVersion =
+        document.getElementById('version').value.trim();
+      if (!rawVersion) throw new Error('Version is required');
+
+      const accepted = update({
+        gameId: 'g1',
+        version: Number(rawVersion),
+        providers: ['A', 'B', 'C'].map(id => ({
+          id,
+          decimalOdds: readOdds('odds' + id)
+        }))
+      });
+
+      if (!accepted) {
+        status.textContent =
+          'Snapshot ignored; displaying version ' + currentVersion;
+      }
+    } catch (error) {
+      status.textContent = error.message;
+    }
+  });
+
+  document.querySelector('#reset').addEventListener('click', reset);
+  reset();
+})();
+</script>
+</body>
+</html>
